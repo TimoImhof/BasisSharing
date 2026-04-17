@@ -21,7 +21,7 @@ class Group:
         self._init_basis_coefficient(std_model, s, invs)
 
     def _init_gpt2(self, std_model):
-        assert self.model_type == 'gpt2'
+        assert self.model_type == "gpt2"
         w = []
         model = std_model.transformer.h
         for layer in self.member:
@@ -30,7 +30,7 @@ class Group:
         return w
 
     def _init_llama2(self, std_model):
-        assert self.model_type == 'llama2'
+        assert self.model_type == "llama2"
         w = []
         model = std_model.model.layers
         for layer in self.member:
@@ -48,7 +48,7 @@ class Group:
         return w
 
     def _init_mistral(self, std_model):
-        assert self.model_type == 'mistral'
+        assert self.model_type == "mistral"
         w = []
         model = std_model.model.layers
         for layer in self.member:
@@ -57,7 +57,7 @@ class Group:
         return w
 
     def _init_basis_coefficient(self, std_model, s, invs):
-        if self.model_type == 'gpt2':
+        if self.model_type == "gpt2":
             w = self._init_gpt2(std_model)
         elif self.model_type == "llama2":
             w = self._init_llama2(std_model)
@@ -83,12 +83,12 @@ class Group:
         for i, layer in enumerate(self.member):
             res[layer] = {}
             start = offset * i
-            co_attn = self.coefficient[:, start:start + offset]
+            co_attn = self.coefficient[:, start : start + offset]
             res[layer][self.name] = co_attn
         return res
 
     def change_basis(self, model, num_basis, basis_name):
-        if self.model_type == 'gpt2':
+        if self.model_type == "gpt2":
             tmp_model = model.transformer
         elif self.model_type == "llama2":
             tmp_model = model.model
@@ -98,11 +98,13 @@ class Group:
             tmp_model = model.model
         else:
             raise NotImplementedError
-        tmp_model.get_submodule(basis_name)[str(self.member[0])].set_weight(self.basis[:, :num_basis])
+        tmp_model.get_submodule(basis_name)[str(self.member[0])].set_weight(
+            self.basis[:, :num_basis]
+        )
         return model
 
     def change_coefficient(self, model, num_basis):
-        if self.model_type == 'gpt2':
+        if self.model_type == "gpt2":
             tmp_model = model.transformer.h
         elif self.model_type == "llama2":
             tmp_model = model.model.layers
@@ -119,16 +121,28 @@ class Group:
         return model
 
 
-def change_model(std_model, model, model_type, groups, name, step, num_basis, basis_name, calib_path):
+def change_model(
+    std_model, model, model_type, groups, name, step, num_basis, basis_name, calib_path
+):
     for group in tqdm(groups):
         s, inv_s = Calib.get_s_inv_s(group, name, model_type, calib_path)
-        item = Group(std_model, group, name=name, step=step, model_type=model_type, s=s, invs=inv_s)
+        item = Group(
+            std_model,
+            group,
+            name=name,
+            step=step,
+            model_type=model_type,
+            s=s,
+            invs=inv_s,
+        )
         model = item.change_basis(model, num_basis, basis_name)
         model = item.change_coefficient(model, num_basis)
     return model
 
 
-def update_model(std_model, model, model_type, groups, name, step, num_basis, basis_name, calib_path):
+def update_model(
+    std_model, model, model_type, groups, name, step, num_basis, basis_name, calib_path
+):
     if model_type == "gpt2":
         tmp_std_model = std_model.transformer.h
         tmp_model = model.model.trtansformer.h
@@ -170,7 +184,7 @@ def update_model(std_model, model, model_type, groups, name, step, num_basis, ba
         v = vt.T
 
         for i, layer_idx in enumerate(group):
-            data = v[:, i * step:(i + 1) * step]
+            data = v[:, i * step : (i + 1) * step]
             tmp_model[layer_idx].get_submodule(name).set_weight(data)
 
     return model

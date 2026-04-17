@@ -32,20 +32,20 @@ class Hook:
 class Calib:
     @staticmethod
     def save(path, data):
-        with open(path, 'wb') as f:
+        with open(path, "wb") as f:
             pickle.dump(data, f)
 
     @staticmethod
     def load(path):
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             return pickle.load(f)
 
     @staticmethod
     def get_calib_data(group, name, save_path=None):
         assert save_path is not None
         # calibration data for up and gate is the same
-        if name == 'mlp.gate_proj':
-            name = 'mlp.up_proj'
+        if name == "mlp.gate_proj":
+            name = "mlp.up_proj"
         if name == "self_attn.q_proj" or name == "self_attn.v_proj":
             name = "self_attn.k_proj"
         data = None
@@ -60,7 +60,10 @@ class Calib:
                     data += tmp_data
             else:
                 raise FileNotFoundError(
-                    "{} not found. You should run build_calibration_dataset first!".format(file_name))
+                    "{} not found. You should run build_calibration_dataset first!".format(
+                        file_name
+                    )
+                )
         return data
 
     @staticmethod
@@ -72,7 +75,7 @@ class Calib:
         except Exception as e:
             print("Warning: eigen scaling_diag_matrix is not positive!")
             eigenvalues = torch.linalg.eigvalsh(data)
-            data += (- eigenvalues[0] + 7e-6) * torch.eye(data.shape[0]).to(data.device)
+            data += (-eigenvalues[0] + 7e-6) * torch.eye(data.shape[0]).to(data.device)
             scaling_diag_matrix = torch.linalg.cholesky(data).T
             eigenvalues = None
             del eigenvalues

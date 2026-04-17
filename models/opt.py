@@ -1,6 +1,12 @@
 import torch
 import torch.nn as nn
-from transformers.models.opt.modeling_opt import OPTAttention, OPTDecoderLayer, OPTDecoder, OPTModel, OPTForCausalLM
+from transformers.models.opt.modeling_opt import (
+    OPTAttention,
+    OPTDecoderLayer,
+    OPTDecoder,
+    OPTModel,
+    OPTForCausalLM,
+)
 from transformers.modeling_outputs import BaseModelOutputWithPast
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
 from transformers.utils import logging
@@ -19,24 +25,32 @@ class ShareOPTAttention(OPTAttention):
         self.layer_idx = layer_idx
 
         if share_k:
-            self.k_proj = Coefficient(self.embed_dim, config.num_basis_k, bias=self.enable_bias)
+            self.k_proj = Coefficient(
+                self.embed_dim, config.num_basis_k, bias=self.enable_bias
+            )
         if share_q:
-            self.q_proj = Coefficient(self.embed_dim, config.num_basis_q, bias=self.enable_bias)
+            self.q_proj = Coefficient(
+                self.embed_dim, config.num_basis_q, bias=self.enable_bias
+            )
         if share_v:
-            self.v_proj = Coefficient(self.embed_dim, config.num_basis_v, bias=self.enable_bias)
+            self.v_proj = Coefficient(
+                self.embed_dim, config.num_basis_v, bias=self.enable_bias
+            )
 
         if share_o:
-            self.out_proj = Coefficient(self.embed_dim, config.num_basis_o, bias=self.enable_bias)
+            self.out_proj = Coefficient(
+                self.embed_dim, config.num_basis_o, bias=self.enable_bias
+            )
 
     def forward(
-            self,
-            hidden_states,
-            key_value_states=None,
-            past_key_value=None,
-            attention_mask=None,
-            layer_head_mask=None,
-            output_attentions: bool = False,
-            **kwargs,
+        self,
+        hidden_states,
+        key_value_states=None,
+        past_key_value=None,
+        attention_mask=None,
+        layer_head_mask=None,
+        output_attentions: bool = False,
+        **kwargs,
     ):
         """Input shape: Batch x Time x Channel"""
 
@@ -47,7 +61,10 @@ class ShareOPTAttention(OPTAttention):
         bsz, tgt_len, _ = hidden_states.size()
 
         if self.share_q:
-            query_states = self.q_proj(kwargs["q_basis"][str(self.layer_idx)](hidden_states)) * self.scaling
+            query_states = (
+                self.q_proj(kwargs["q_basis"][str(self.layer_idx)](hidden_states))
+                * self.scaling
+            )
 
         # get query proj
         else:
@@ -65,11 +82,19 @@ class ShareOPTAttention(OPTAttention):
         elif past_key_value is not None:
             # reuse k, v, self_attention
             if self.share_k:
-                key_states = self._shape(self.k_proj(kwargs['k_basis'][str(self.layer_idx)](hidden_states)), -1, bsz)
+                key_states = self._shape(
+                    self.k_proj(kwargs["k_basis"][str(self.layer_idx)](hidden_states)),
+                    -1,
+                    bsz,
+                )
             else:
                 key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
             if self.share_v:
-                value_states = self._shape(self.v_proj(kwargs['v_basis'][str(self.layer_idx)](hidden_states)), -1, bsz)
+                value_states = self._shape(
+                    self.v_proj(kwargs["v_basis"][str(self.layer_idx)](hidden_states)),
+                    -1,
+                    bsz,
+                )
             else:
                 value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
             key_states = torch.cat([past_key_value[0], key_states], dim=2)
@@ -77,11 +102,19 @@ class ShareOPTAttention(OPTAttention):
         else:
             # self_attention
             if self.share_k:
-                key_states = self._shape(self.k_proj(kwargs['k_basis'][str(self.layer_idx)](hidden_states)), -1, bsz)
+                key_states = self._shape(
+                    self.k_proj(kwargs["k_basis"][str(self.layer_idx)](hidden_states)),
+                    -1,
+                    bsz,
+                )
             else:
                 key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
             if self.share_v:
-                value_states = self._shape(self.v_proj(kwargs['v_basis'][str(self.layer_idx)](hidden_states)), -1, bsz)
+                value_states = self._shape(
+                    self.v_proj(kwargs["v_basis"][str(self.layer_idx)](hidden_states)),
+                    -1,
+                    bsz,
+                )
             else:
                 value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
 
@@ -114,15 +147,23 @@ class ShareOPTAttention(OPTAttention):
                 raise ValueError(
                     f"Attention mask should be of size {(bsz, 1, tgt_len, src_len)}, but is {attention_mask.size()}"
                 )
-            attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len) + attention_mask
+            attn_weights = (
+                attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
+                + attention_mask
+            )
             attn_weights = torch.max(
-                attn_weights, torch.tensor(torch.finfo(attn_weights.dtype).min, device=attn_weights.device)
+                attn_weights,
+                torch.tensor(
+                    torch.finfo(attn_weights.dtype).min, device=attn_weights.device
+                ),
             )
             attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
         # upcast to fp32 if the weights are in fp16. Please see https://github.com/huggingface/transformers/pull/17437
         if attn_weights.dtype == torch.float16:
-            attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(torch.float16)
+            attn_weights = nn.functional.softmax(
+                attn_weights, dim=-1, dtype=torch.float32
+            ).to(torch.float16)
         else:
             attn_weights = nn.functional.softmax(attn_weights, dim=-1)
 
@@ -132,7 +173,9 @@ class ShareOPTAttention(OPTAttention):
                     f"Head mask for a single layer should be of size {(self.num_heads,)}, but is"
                     f" {layer_head_mask.size()}"
                 )
-            attn_weights = layer_head_mask.view(1, -1, 1, 1) * attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
+            attn_weights = layer_head_mask.view(1, -1, 1, 1) * attn_weights.view(
+                bsz, self.num_heads, tgt_len, src_len
+            )
             attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
         if output_attentions:
@@ -140,12 +183,18 @@ class ShareOPTAttention(OPTAttention):
             # make sure that attn_weights keeps its gradient.
             # In order to do so, attn_weights have to be reshaped
             # twice and have to be reused in the following
-            attn_weights_reshaped = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_weights = attn_weights_reshaped.view(bsz * self.num_heads, tgt_len, src_len)
+            attn_weights_reshaped = attn_weights.view(
+                bsz, self.num_heads, tgt_len, src_len
+            )
+            attn_weights = attn_weights_reshaped.view(
+                bsz * self.num_heads, tgt_len, src_len
+            )
         else:
             attn_weights_reshaped = None
 
-        attn_probs = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
+        attn_probs = nn.functional.dropout(
+            attn_weights, p=self.dropout, training=self.training
+        )
 
         attn_output = torch.bmm(attn_probs, value_states)
 
@@ -163,7 +212,7 @@ class ShareOPTAttention(OPTAttention):
         attn_output = attn_output.reshape(bsz, tgt_len, self.embed_dim)
 
         if self.share_o:
-            attn_output = kwargs['o_basis'][str(self.layer_idx)](attn_output)
+            attn_output = kwargs["o_basis"][str(self.layer_idx)](attn_output)
         attn_output = self.out_proj(attn_output)
 
         return attn_output, attn_weights_reshaped, past_key_value
@@ -181,27 +230,33 @@ class ShareOPTDecoderLayer(OPTDecoderLayer):
         self.share_down = self._in_group(config.down_groups, layer_idx)
         self.layer_idx = layer_idx
 
-        self.self_attn = ShareOPTAttention(config, layer_idx, share_k, share_q, share_v, share_o)
+        self.self_attn = ShareOPTAttention(
+            config, layer_idx, share_k, share_q, share_v, share_o
+        )
 
         if self.share_up:
-            self.fc1 = Coefficient(config.ffn_dim, config.num_basis_up, bias=config.enable_bias)
+            self.fc1 = Coefficient(
+                config.ffn_dim, config.num_basis_up, bias=config.enable_bias
+            )
 
         if self.share_down:
-            self.fc2 = Coefficient(self.embed_dim, config.num_basis_down, bias=config.enable_bias)
+            self.fc2 = Coefficient(
+                self.embed_dim, config.num_basis_down, bias=config.enable_bias
+            )
 
     @staticmethod
     def _in_group(groups, layer_idx):
         return any(layer_idx in group for group in groups)
 
     def forward(
-            self,
-            hidden_states,
-            attention_mask=None,
-            layer_head_mask=None,
-            past_key_value=None,
-            output_attentions=False,
-            use_cache=False,
-            **kwargs
+        self,
+        hidden_states,
+        attention_mask=None,
+        layer_head_mask=None,
+        past_key_value=None,
+        output_attentions=False,
+        use_cache=False,
+        **kwargs,
     ):
         """
         Args:
@@ -232,9 +287,11 @@ class ShareOPTDecoderLayer(OPTDecoderLayer):
             attention_mask=attention_mask,
             layer_head_mask=layer_head_mask,
             output_attentions=output_attentions,
-            **kwargs
+            **kwargs,
         )
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = nn.functional.dropout(
+            hidden_states, p=self.dropout, training=self.training
+        )
         hidden_states = residual + hidden_states
 
         # 350m applies layer norm AFTER attention
@@ -251,15 +308,17 @@ class ShareOPTDecoderLayer(OPTDecoderLayer):
             hidden_states = self.final_layer_norm(hidden_states)
 
         if self.share_up:
-            hidden_states = kwargs['up_basis'][str(self.layer_idx)](hidden_states)
+            hidden_states = kwargs["up_basis"][str(self.layer_idx)](hidden_states)
         hidden_states = self.fc1(hidden_states)
 
         hidden_states = self.activation_fn(hidden_states)
 
         if self.share_down:
-            hidden_states = kwargs['down_basis'][str(self.layer_idx)](hidden_states)
+            hidden_states = kwargs["down_basis"][str(self.layer_idx)](hidden_states)
         hidden_states = self.fc2(hidden_states)
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = nn.functional.dropout(
+            hidden_states, p=self.dropout, training=self.training
+        )
 
         hidden_states = (residual + hidden_states).view(hidden_states_shape)
 
@@ -282,15 +341,21 @@ class ShareOPTDecoder(OPTDecoder):
     def __init__(self, config):
         super().__init__(config)
         if hasattr(config, "num_basis_k"):
-            self.k_basis = build_basis_collection(config.k_groups, config.num_basis_k, config.hidden_size)
+            self.k_basis = build_basis_collection(
+                config.k_groups, config.num_basis_k, config.hidden_size
+            )
         else:
             self.k_basis = None
         if hasattr(config, "num_basis_q"):
-            self.q_basis = build_basis_collection(config.q_groups, config.num_basis_q, config.hidden_size)
+            self.q_basis = build_basis_collection(
+                config.q_groups, config.num_basis_q, config.hidden_size
+            )
         else:
             self.q_basis = None
         if hasattr(config, "num_basis_v"):
-            self.v_basis = build_basis_collection(config.v_groups, config.num_basis_v, config.hidden_size)
+            self.v_basis = build_basis_collection(
+                config.v_groups, config.num_basis_v, config.hidden_size
+            )
         else:
             self.v_basis = None
 
@@ -299,32 +364,39 @@ class ShareOPTDecoder(OPTDecoder):
         # else:
         #     self.attn_basis = None
         if hasattr(config, "num_basis_o"):
-            self.o_basis = build_basis_collection(config.o_groups, config.num_basis_o, config.hidden_size)
+            self.o_basis = build_basis_collection(
+                config.o_groups, config.num_basis_o, config.hidden_size
+            )
         else:
             self.o_basis = None
         if hasattr(config, "num_basis_up"):
-            self.up_basis = build_basis_collection(config.up_groups, config.num_basis_up, config.hidden_size)
+            self.up_basis = build_basis_collection(
+                config.up_groups, config.num_basis_up, config.hidden_size
+            )
         else:
             self.up_basis = None
         if hasattr(config, "num_basis_down"):
-            self.down_basis = build_basis_collection(config.down_groups, config.num_basis_down,
-                                                     config.ffn_dim)
+            self.down_basis = build_basis_collection(
+                config.down_groups, config.num_basis_down, config.ffn_dim
+            )
         else:
             self.down_basis = None
 
-        self.layers = nn.ModuleList([ShareOPTDecoderLayer(config, i) for i in range(config.num_hidden_layers)])
+        self.layers = nn.ModuleList(
+            [ShareOPTDecoderLayer(config, i) for i in range(config.num_hidden_layers)]
+        )
 
     def forward(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            head_mask=None,
-            past_key_values=None,
-            inputs_embeds=None,
-            use_cache=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
+        self,
+        input_ids=None,
+        attention_mask=None,
+        head_mask=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
     ):
         r"""
         Args:
@@ -373,37 +445,55 @@ class ShareOPTDecoder(OPTDecoder):
             return_dict (`bool`, *optional*):
                 Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
         """
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         # retrieve input_ids and inputs_embeds
         if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both decoder_input_ids and decoder_inputs_embeds at the same time")
+            raise ValueError(
+                "You cannot specify both decoder_input_ids and decoder_inputs_embeds at the same time"
+            )
         elif input_ids is not None:
             input_shape = input_ids.size()
             input_ids = input_ids.view(-1, input_shape[-1])
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
         else:
-            raise ValueError("You have to specify either decoder_input_ids or decoder_inputs_embeds")
+            raise ValueError(
+                "You have to specify either decoder_input_ids or decoder_inputs_embeds"
+            )
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
         batch_size, seq_length = input_shape
-        past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
+        past_key_values_length = (
+            past_key_values[0][0].shape[2] if past_key_values is not None else 0
+        )
         # required mask seq length can be calculated via length of past
         mask_seq_length = past_key_values_length + seq_length
 
         # embed positions
         if self._use_flash_attention_2:
             # 2d mask is passed through the layers
-            causal_attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
+            causal_attention_mask = (
+                attention_mask
+                if (attention_mask is not None and 0 in attention_mask)
+                else None
+            )
             attention_mask = (
                 torch.ones(batch_size, mask_seq_length, device=inputs_embeds.device)
                 if attention_mask is None
@@ -412,7 +502,9 @@ class ShareOPTDecoder(OPTDecoder):
         else:
             # 4d mask is passed through the layers
             if attention_mask is None:
-                attention_mask = torch.ones(batch_size, mask_seq_length, device=inputs_embeds.device)
+                attention_mask = torch.ones(
+                    batch_size, mask_seq_length, device=inputs_embeds.device
+                )
             elif attention_mask.shape[1] != mask_seq_length:
                 raise ValueError(
                     f"The provided attention mask has length {attention_mask.shape[1]}, but its length should be "
@@ -460,7 +552,9 @@ class ShareOPTDecoder(OPTDecoder):
                 if dropout_probability < self.layerdrop:
                     continue
 
-            past_key_value = past_key_values[idx] if past_key_values is not None else None
+            past_key_value = (
+                past_key_values[idx] if past_key_values is not None else None
+            )
 
             if self.gradient_checkpointing and self.training:
                 raise NotImplementedError
@@ -509,7 +603,11 @@ class ShareOPTDecoder(OPTDecoder):
 
         next_cache = next_decoder_cache if use_cache else None
         if not return_dict:
-            return tuple(v for v in [hidden_states, next_cache, all_hidden_states, all_self_attns] if v is not None)
+            return tuple(
+                v
+                for v in [hidden_states, next_cache, all_hidden_states, all_self_attns]
+                if v is not None
+            )
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,

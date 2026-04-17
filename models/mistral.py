@@ -1,6 +1,13 @@
 import torch
-from transformers.models.mistral.modeling_mistral import MistralMLP, MistralSdpaAttention, MistralDecoderLayer, \
-    MistralModel, MistralForCausalLM, apply_rotary_pos_emb, repeat_kv
+from transformers.models.mistral.modeling_mistral import (
+    MistralMLP,
+    MistralSdpaAttention,
+    MistralDecoderLayer,
+    MistralModel,
+    MistralForCausalLM,
+    apply_rotary_pos_emb,
+    repeat_kv,
+)
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
 from transformers.modeling_outputs import BaseModelOutputWithPast
 from model_utils import build_basis_collection, Coefficient
@@ -25,18 +32,22 @@ class ShareMistralMLP(MistralMLP):
 
     def forward(self, hidden_state, **kwargs):
         if self.share_gate:
-            gate = self.act_fn(self.gate_proj(kwargs['gate_basis'][str(self.layer_idx)](hidden_state)))
+            gate = self.act_fn(
+                self.gate_proj(kwargs["gate_basis"][str(self.layer_idx)](hidden_state))
+            )
         else:
             gate = self.act_fn(self.gate_proj(hidden_state))
 
         if self.share_up:
-            up = self.up_proj(kwargs['up_basis'][str(self.layer_idx)](hidden_state))
+            up = self.up_proj(kwargs["up_basis"][str(self.layer_idx)](hidden_state))
         else:
             up = self.up_proj(hidden_state)
 
         hidden_state = gate * up
         if self.share_down:
-            down = self.down_proj(kwargs['down_basis'][str(self.layer_idx)](hidden_state))
+            down = self.down_proj(
+                kwargs["down_basis"][str(self.layer_idx)](hidden_state)
+            )
         else:
             down = self.down_proj(hidden_state)
         return down
@@ -50,24 +61,30 @@ class ShareMistralSdpaAttention(MistralSdpaAttention):
         self.share_v = share_v
         self.share_o = share_o
         if share_q:
-            self.q_proj = Coefficient(self.num_heads * self.head_dim, config.num_basis_q)
+            self.q_proj = Coefficient(
+                self.num_heads * self.head_dim, config.num_basis_q
+            )
         if share_k:
-            self.k_proj = Coefficient(self.num_key_value_heads * self.head_dim, config.num_basis_k)
+            self.k_proj = Coefficient(
+                self.num_key_value_heads * self.head_dim, config.num_basis_k
+            )
         if share_v:
-            self.v_proj = Coefficient(self.num_key_value_heads * self.head_dim, config.num_basis_v)
+            self.v_proj = Coefficient(
+                self.num_key_value_heads * self.head_dim, config.num_basis_v
+            )
         if share_o:
             self.o_proj = Coefficient(self.hidden_size, config.num_basis_o)
 
     def forward(
-            self,
-            hidden_states,
-            attention_mask=None,
-            position_ids=None,
-            past_key_value=None,
-            output_attentions=False,
-            use_cache=False,
-            cache_position=None,
-            **kwargs,
+        self,
+        hidden_states,
+        attention_mask=None,
+        position_ids=None,
+        past_key_value=None,
+        output_attentions=False,
+        use_cache=False,
+        cache_position=None,
+        **kwargs,
     ):
         if output_attentions:
             raise NotImplementedError
@@ -75,31 +92,47 @@ class ShareMistralSdpaAttention(MistralSdpaAttention):
         bsz, q_len, _ = hidden_states.size()
 
         if self.share_k:
-            key_states = self.k_proj(kwargs['k_basis'][str(self.layer_idx)](hidden_states))
+            key_states = self.k_proj(
+                kwargs["k_basis"][str(self.layer_idx)](hidden_states)
+            )
         else:
             key_states = self.k_proj(hidden_states)
 
         if self.share_q:
-            query_states = self.q_proj(kwargs['q_basis'][str(self.layer_idx)](hidden_states))
+            query_states = self.q_proj(
+                kwargs["q_basis"][str(self.layer_idx)](hidden_states)
+            )
         else:
             query_states = self.q_proj(hidden_states)
 
         if self.share_v:
-            value_states = self.v_proj(kwargs['v_basis'][str(self.layer_idx)](hidden_states))
+            value_states = self.v_proj(
+                kwargs["v_basis"][str(self.layer_idx)](hidden_states)
+            )
         else:
             value_states = self.v_proj(hidden_states)
 
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.view(
+            bsz, q_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        key_states = key_states.view(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
+        value_states = value_states.view(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
 
         cos, sin = self.rotary_emb(value_states, position_ids)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        query_states, key_states = apply_rotary_pos_emb(
+            query_states, key_states, cos, sin
+        )
 
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -132,7 +165,7 @@ class ShareMistralSdpaAttention(MistralSdpaAttention):
         attn_output = attn_output.view(bsz, q_len, -1)
 
         if self.share_o:
-            attn_output = kwargs['o_basis'][str(self.layer_idx)](attn_output)
+            attn_output = kwargs["o_basis"][str(self.layer_idx)](attn_output)
             attn_output = self.o_proj(attn_output)
         else:
             attn_output = self.o_proj(attn_output)
@@ -151,7 +184,9 @@ class ShareMistralDecoderLayer(MistralDecoderLayer):
         share_up = self._in_group(config.up_groups, layer_idx)
         share_down = self._in_group(config.down_groups, layer_idx)
         share_gate = self._in_group(config.gate_groups, layer_idx)
-        self.self_attn = ShareMistralSdpaAttention(config, layer_idx, share_k, share_q, share_v, share_o)
+        self.self_attn = ShareMistralSdpaAttention(
+            config, layer_idx, share_k, share_q, share_v, share_o
+        )
         self.mlp = ShareMistralMLP(config, share_gate, share_up, share_down, layer_idx)
 
     @staticmethod
@@ -159,15 +194,15 @@ class ShareMistralDecoderLayer(MistralDecoderLayer):
         return any(layer_idx in group for group in groups)
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            attention_mask=None,
-            position_ids=None,
-            past_key_value=None,
-            output_attentions=False,
-            use_cache=False,
-            cache_position=None,
-            **kwargs,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask=None,
+        position_ids=None,
+        past_key_value=None,
+        output_attentions=False,
+        use_cache=False,
+        cache_position=None,
+        **kwargs,
     ):
         """
         Args:
@@ -226,59 +261,83 @@ class ShareMistralModel(MistralModel):
     def __init__(self, config):
         super().__init__(config)
         if hasattr(config, "num_basis_k"):
-            self.k_basis = build_basis_collection(config.k_groups, config.num_basis_k, config.hidden_size)
+            self.k_basis = build_basis_collection(
+                config.k_groups, config.num_basis_k, config.hidden_size
+            )
         else:
             self.k_basis = None
         if hasattr(config, "num_basis_q"):
-            self.q_basis = build_basis_collection(config.q_groups, config.num_basis_q, config.hidden_size)
+            self.q_basis = build_basis_collection(
+                config.q_groups, config.num_basis_q, config.hidden_size
+            )
         else:
             self.q_basis = None
         if hasattr(config, "num_basis_v"):
-            self.v_basis = build_basis_collection(config.v_groups, config.num_basis_v, config.hidden_size)
+            self.v_basis = build_basis_collection(
+                config.v_groups, config.num_basis_v, config.hidden_size
+            )
         else:
             self.v_basis = None
         if hasattr(config, "num_basis_o"):
-            self.o_basis = build_basis_collection(config.o_groups, config.num_basis_o, config.hidden_size)
+            self.o_basis = build_basis_collection(
+                config.o_groups, config.num_basis_o, config.hidden_size
+            )
         else:
             self.o_basis = None
         if hasattr(config, "num_basis_gate"):
-            self.gate_basis = build_basis_collection(config.gate_groups, config.num_basis_gate, config.hidden_size)
+            self.gate_basis = build_basis_collection(
+                config.gate_groups, config.num_basis_gate, config.hidden_size
+            )
         else:
             self.gate_basis = None
         if hasattr(config, "num_basis_up"):
-            self.up_basis = build_basis_collection(config.up_groups, config.num_basis_up, config.hidden_size)
+            self.up_basis = build_basis_collection(
+                config.up_groups, config.num_basis_up, config.hidden_size
+            )
         else:
             self.up_basis = None
         if hasattr(config, "num_basis_down"):
-            self.down_basis = build_basis_collection(config.down_groups, config.num_basis_down,
-                                                     config.intermediate_size)
+            self.down_basis = build_basis_collection(
+                config.down_groups, config.num_basis_down, config.intermediate_size
+            )
         else:
             self.down_basis = None
 
         self.layers = torch.nn.ModuleList(
-            [ShareMistralDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [
+                ShareMistralDecoderLayer(config, layer_idx)
+                for layer_idx in range(config.num_hidden_layers)
+            ]
         )
 
     def forward(
-            self,
-            input_ids: torch.LongTensor = None,
-            attention_mask=None,
-            position_ids=None,
-            past_key_values=None,
-            inputs_embeds=None,
-            use_cache=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
-            cache_position=None,
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask=None,
+        position_ids=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        cache_position=None,
     ):
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         # retrieve input_ids and inputs_embeds
         if (input_ids is None) ^ (inputs_embeds is not None):
@@ -305,16 +364,25 @@ class ShareMistralModel(MistralModel):
             )
 
         if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+            past_seen_tokens = (
+                past_key_values.get_seq_length() if past_key_values is not None else 0
+            )
             cache_position = torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
+                past_seen_tokens,
+                past_seen_tokens + inputs_embeds.shape[1],
+                device=inputs_embeds.device,
             )
 
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
         causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_key_values, use_cache, output_attentions
+            attention_mask,
+            inputs_embeds,
+            cache_position,
+            past_key_values,
+            use_cache,
+            output_attentions,
         )
 
         hidden_states = inputs_embeds
@@ -377,7 +445,11 @@ class ShareMistralModel(MistralModel):
             next_cache = next_cache.to_legacy_cache()
 
         if not return_dict:
-            return tuple(v for v in [hidden_states, next_cache, all_hidden_states, all_self_attns] if v is not None)
+            return tuple(
+                v
+                for v in [hidden_states, next_cache, all_hidden_states, all_self_attns]
+                if v is not None
+            )
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,

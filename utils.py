@@ -1,8 +1,5 @@
-def match_state_dict(
-        state_dict_a,
-        state_dict_b
-):
-    """ Filters state_dict_b to contain only states that are present in state_dict_a.
+def match_state_dict(state_dict_a, state_dict_b):
+    """Filters state_dict_b to contain only states that are present in state_dict_a.
 
     Matching happens according to two criteria:
         - Is the key present in state_dict_a?

@@ -32,7 +32,7 @@ def compute_ppl(max_length, stride, data, model, device):
     return ppl
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     cmd_args = add_args()
     config = ShareConfig(cmd_args)
     print(config.compression_ratio)
@@ -41,8 +41,10 @@ if __name__ == '__main__':
     else:
         tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     tokenizer.pad_token = "[PAD]"
-    train_dataset, val_dataset, test_dataset, data_collator = prepare_data(config.dataset_name, tokenizer,
-                                                                           config.context_length,
-                                                                           config.dataset_cache_dir)
+    train_dataset, val_dataset, test_dataset, data_collator = prepare_data(
+        config.dataset_name, tokenizer, config.context_length, config.dataset_cache_dir
+    )
     model = create_model(config)
-    print(compute_ppl(config.context_length, config.stride, test_dataset, model, "cuda"))
+    print(
+        compute_ppl(config.context_length, config.stride, test_dataset, model, "cuda")
+    )

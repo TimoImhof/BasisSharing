@@ -1,9 +1,15 @@
 import torch.nn as nn
 import torch
 from typing import List, Optional, Tuple, Union
-from transformers.models.llama.modeling_llama import (LlamaSdpaAttention, LlamaDecoderLayer,
-                                                      LlamaModel, repeat_kv, apply_rotary_pos_emb, LlamaMLP,
-                                                      LlamaForCausalLM)
+from transformers.models.llama.modeling_llama import (
+    LlamaSdpaAttention,
+    LlamaDecoderLayer,
+    LlamaModel,
+    repeat_kv,
+    apply_rotary_pos_emb,
+    LlamaMLP,
+    LlamaForCausalLM,
+)
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
 from transformers.modeling_outputs import BaseModelOutputWithPast
 from transformers.utils import logging
@@ -18,23 +24,27 @@ class ShareLlamaSdpaAttention(LlamaSdpaAttention):
         self.q_basis = q_basis
         self.q_proj = Coefficient(self.num_heads * self.head_dim, config.num_basis_q)
         self.k_basis = k_basis
-        self.k_proj = Coefficient(self.num_key_value_heads * self.head_dim, config.num_basis_k)
+        self.k_proj = Coefficient(
+            self.num_key_value_heads * self.head_dim, config.num_basis_k
+        )
         self.v_basis = v_basis
-        self.v_proj = Coefficient(self.num_key_value_heads * self.head_dim, config.num_basis_v)
+        self.v_proj = Coefficient(
+            self.num_key_value_heads * self.head_dim, config.num_basis_v
+        )
         self.o_basis = o_basis
         self.o_proj = Coefficient(self.hidden_size, config.num_basis_o)
 
     def forward(
-            self,
-            hidden_states,
-            attention_mask=None,
-            position_ids: Optional = None,
-            past_key_value=None,
-            output_attentions=False,
-            use_cache=False,
-            cache_position=None,
-            position_embeddings=None,  # will become mandatory in v4.45
-            **kwargs,
+        self,
+        hidden_states,
+        attention_mask=None,
+        position_ids: Optional = None,
+        past_key_value=None,
+        output_attentions=False,
+        use_cache=False,
+        cache_position=None,
+        position_embeddings=None,  # will become mandatory in v4.45
+        **kwargs,
     ):
         if output_attentions:
             raise NotImplementedError
@@ -46,9 +56,15 @@ class ShareLlamaSdpaAttention(LlamaSdpaAttention):
 
         value_states = self.v_proj(self.v_basis(hidden_states))
 
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.view(
+            bsz, q_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        key_states = key_states.view(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
+        value_states = value_states.view(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
 
         if position_embeddings is None:
             logger.warning_once(
@@ -60,12 +76,16 @@ class ShareLlamaSdpaAttention(LlamaSdpaAttention):
             cos, sin = self.rotary_emb(value_states, position_ids)
         else:
             cos, sin = position_embeddings
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        query_states, key_states = apply_rotary_pos_emb(
+            query_states, key_states, cos, sin
+        )
 
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -118,39 +138,65 @@ class ShareLlamaMLP(LlamaMLP):
             raise NotImplementedError
         else:
             down = self.down_proj(
-                self.down_basis(self.act_fn(self.gate_proj(self.gate_basis(x))) * self.up_proj(self.up_basis(x))))
+                self.down_basis(
+                    self.act_fn(self.gate_proj(self.gate_basis(x)))
+                    * self.up_proj(self.up_basis(x))
+                )
+            )
         return down
 
 
 class ShareLlamaDecoderLayer(LlamaDecoderLayer):
-    def __init__(self, config, layer_idx, k_basis, q_basis, v_basis, o_basis, up_basis, gate_basis, down_basis):
+    def __init__(
+        self,
+        config,
+        layer_idx,
+        k_basis,
+        q_basis,
+        v_basis,
+        o_basis,
+        up_basis,
+        gate_basis,
+        down_basis,
+    ):
         super().__init__(config, layer_idx)
 
-        self.self_attn = ShareLlamaSdpaAttention(config, layer_idx,
-                                                 k_basis[str(layer_idx)],
-                                                 q_basis[str(layer_idx)],
-                                                 v_basis[str(layer_idx)],
-                                                 o_basis[str(layer_idx)])
-        self.mlp = ShareLlamaMLP(config, layer_idx, up_basis[str(layer_idx)],
-                                 gate_basis[str(layer_idx)],
-                                 down_basis[str(layer_idx)])
+        self.self_attn = ShareLlamaSdpaAttention(
+            config,
+            layer_idx,
+            k_basis[str(layer_idx)],
+            q_basis[str(layer_idx)],
+            v_basis[str(layer_idx)],
+            o_basis[str(layer_idx)],
+        )
+        self.mlp = ShareLlamaMLP(
+            config,
+            layer_idx,
+            up_basis[str(layer_idx)],
+            gate_basis[str(layer_idx)],
+            down_basis[str(layer_idx)],
+        )
 
     @staticmethod
     def _in_group(groups, layer_idx):
         return any(layer_idx in group for group in groups)
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_value: Optional[Cache] = None,
-            output_attentions: Optional[bool] = False,
-            use_cache: Optional[bool] = False,
-            cache_position: Optional[torch.LongTensor] = None,
-            position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.45
-            **kwargs,
-    ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: Optional[bool] = False,
+        use_cache: Optional[bool] = False,
+        cache_position: Optional[torch.LongTensor] = None,
+        position_embeddings: Optional[
+            Tuple[torch.Tensor, torch.Tensor]
+        ] = None,  # will become mandatory in v4.45
+        **kwargs,
+    ) -> Tuple[
+        torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]
+    ]:
         """
         Args:
             hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
@@ -213,37 +259,63 @@ class ShareLlamaModel(LlamaModel):
         super().__init__(config)
 
         if hasattr(config, "num_basis_k"):
-            self.k_basis = build_basis_collection(config.k_groups, config.num_basis_k, config.hidden_size)
+            self.k_basis = build_basis_collection(
+                config.k_groups, config.num_basis_k, config.hidden_size
+            )
         else:
             self.k_basis = None
         if hasattr(config, "num_basis_q"):
-            self.q_basis = build_basis_collection(config.q_groups, config.num_basis_q, config.hidden_size)
+            self.q_basis = build_basis_collection(
+                config.q_groups, config.num_basis_q, config.hidden_size
+            )
         else:
             self.q_basis = None
         if hasattr(config, "num_basis_v"):
-            self.v_basis = build_basis_collection(config.v_groups, config.num_basis_v, config.hidden_size)
+            self.v_basis = build_basis_collection(
+                config.v_groups, config.num_basis_v, config.hidden_size
+            )
         else:
             self.v_basis = None
         if hasattr(config, "num_basis_o"):
-            self.o_basis = build_basis_collection(config.o_groups, config.num_basis_o, config.hidden_size)
+            self.o_basis = build_basis_collection(
+                config.o_groups, config.num_basis_o, config.hidden_size
+            )
         else:
             self.o_basis = None
         if hasattr(config, "num_basis_gate"):
-            self.gate_basis = build_basis_collection(config.gate_groups, config.num_basis_gate, config.hidden_size)
+            self.gate_basis = build_basis_collection(
+                config.gate_groups, config.num_basis_gate, config.hidden_size
+            )
         else:
             self.gate_basis = None
         if hasattr(config, "num_basis_up"):
-            self.up_basis = build_basis_collection(config.up_groups, config.num_basis_up, config.hidden_size)
+            self.up_basis = build_basis_collection(
+                config.up_groups, config.num_basis_up, config.hidden_size
+            )
         else:
             self.up_basis = None
         if hasattr(config, "num_basis_down"):
-            self.down_basis = build_basis_collection(config.down_groups, config.num_basis_down,
-                                                     config.intermediate_size)
+            self.down_basis = build_basis_collection(
+                config.down_groups, config.num_basis_down, config.intermediate_size
+            )
         else:
             self.down_basis = None
 
         self.layers = nn.ModuleList(
-            [ShareLlamaDecoderLayer(config, layer_idx, self.k_basis, self.q_basis, self.v_basis, self.o_basis, self.up_basis, self.gate_basis, self.down_basis) for layer_idx in range(config.num_hidden_layers)]
+            [
+                ShareLlamaDecoderLayer(
+                    config,
+                    layer_idx,
+                    self.k_basis,
+                    self.q_basis,
+                    self.v_basis,
+                    self.o_basis,
+                    self.up_basis,
+                    self.gate_basis,
+                    self.down_basis,
+                )
+                for layer_idx in range(config.num_hidden_layers)
+            ]
         )
         # self.post_init()
 
@@ -265,24 +337,32 @@ class ShareLlamaModel(LlamaModel):
                 param.requires_grad = False
 
     def forward(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            position_ids=None,
-            past_key_values=None,
-            inputs_embeds=None,
-            use_cache=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
-            cache_position=None,
+        self,
+        input_ids=None,
+        attention_mask=None,
+        position_ids=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        cache_position=None,
     ):
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError(
@@ -299,7 +379,9 @@ class ShareLlamaModel(LlamaModel):
             inputs_embeds = self.embed_tokens(input_ids)
 
         return_legacy_cache = False
-        if use_cache and not isinstance(past_key_values, Cache):  # kept for BC (non `Cache` `past_key_values` inputs)
+        if use_cache and not isinstance(
+            past_key_values, Cache
+        ):  # kept for BC (non `Cache` `past_key_values` inputs)
             return_legacy_cache = True
             past_key_values = DynamicCache.from_legacy_cache(past_key_values)
             logger.warning_once(
@@ -308,15 +390,23 @@ class ShareLlamaModel(LlamaModel):
             )
 
         if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+            past_seen_tokens = (
+                past_key_values.get_seq_length() if past_key_values is not None else 0
+            )
             cache_position = torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
+                past_seen_tokens,
+                past_seen_tokens + inputs_embeds.shape[1],
+                device=inputs_embeds.device,
             )
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
         causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+            attention_mask,
+            inputs_embeds,
+            cache_position,
+            past_key_values,
+            output_attentions,
         )
         hidden_states = inputs_embeds
 
@@ -376,7 +466,11 @@ class ShareLlamaModel(LlamaModel):
             next_cache = next_cache.to_legacy_cache()
 
         if not return_dict:
-            return tuple(v for v in [hidden_states, next_cache, all_hidden_states, all_self_attns] if v is not None)
+            return tuple(
+                v
+                for v in [hidden_states, next_cache, all_hidden_states, all_self_attns]
+                if v is not None
+            )
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,
@@ -390,4 +484,3 @@ class ShareLlamaForCausalLM(LlamaForCausalLM):
         super().__init__(config)
         self.model = ShareLlamaModel(config)
         self.config = config
-

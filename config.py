@@ -36,13 +36,13 @@ def add_args():
 
 class ShareConfig:
     name_map = {
-        'meta-llama/Llama-2-7b-hf': "llama2-7b",
+        "meta-llama/Llama-2-7b-hf": "llama2-7b",
         "jeffwan/llama-7b-hf": "llama2-7b",
         "jeffwan/llama-13b-hf": "llama2-13b",
         "jeffwan/llama-30b-hf": "llama2-30b",
-        'gpt2': "gpt2",
-        'facebook/opt-6.7b': 'opt-6.7b',
-        "mistralai/Mistral-7B-v0.1": "mistral-7b"
+        "gpt2": "gpt2",
+        "facebook/opt-6.7b": "opt-6.7b",
+        "mistralai/Mistral-7B-v0.1": "mistral-7b",
     }
 
     weight_info = {
@@ -55,7 +55,6 @@ class ShareConfig:
             "mlp.gate_proj": (4096, 11008),
             "mlp.down_proj": (11008, 4096),
         },
-
         "llama2-13b": {
             "self_attn.k_proj": (5120, 5120),
             "self_attn.q_proj": (5120, 5120),
@@ -65,7 +64,6 @@ class ShareConfig:
             "mlp.gate_proj": (5120, 13824),
             "mlp.down_proj": (13824, 5120),
         },
-
         "llama2-30b": {
             "self_attn.k_proj": (6656, 6656),
             "self_attn.q_proj": (6656, 6656),
@@ -75,14 +73,12 @@ class ShareConfig:
             "mlp.gate_proj": (6656, 17920),
             "mlp.down_proj": (17920, 6656),
         },
-
         "gpt2": {
             "attn.c_attn": (768, 2304),
             "attn.c_proj": (768, 768),
             "mlp.c_fc": (768, 3072),
-            "mlp.c_proj": (3072, 768)
+            "mlp.c_proj": (3072, 768),
         },
-
         "opt-6.7b": {
             "self_attn.k_proj": (4096, 4096),
             "self_attn.q_proj": (4096, 4096),
@@ -100,7 +96,6 @@ class ShareConfig:
             "mlp.gate_proj": (4096, 14336),
             "mlp.down_proj": (14336, 4096),
         },
-
     }
 
     def __init__(self, cmd_args):
