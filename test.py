@@ -1,7 +1,7 @@
 from tqdm import tqdm
 import torch
 from transformers import LlamaTokenizer, AutoTokenizer
-from model_factory import create_model, AutoModelForCausalLM
+from model_factory import create_model
 from config import ShareConfig, add_args
 from prepare_data import prepare_data
 

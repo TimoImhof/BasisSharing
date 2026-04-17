@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
 from transformers.models.llama.modeling_llama import (
     LlamaSdpaAttention,
     LlamaDecoderLayer,
@@ -10,7 +10,7 @@ from transformers.models.llama.modeling_llama import (
     LlamaMLP,
     LlamaForCausalLM,
 )
-from transformers.cache_utils import Cache, DynamicCache, StaticCache
+from transformers.cache_utils import Cache, DynamicCache
 from transformers.modeling_outputs import BaseModelOutputWithPast
 from transformers.utils import logging
 from models.model_utils import build_basis_collection, Coefficient

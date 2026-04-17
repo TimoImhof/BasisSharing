@@ -1,8 +1,6 @@
 import lm_eval
 from lm_eval.models.huggingface import HFLM
 from transformers import LlamaTokenizer, AutoTokenizer, AutoModelForCausalLM
-from prepare_data import prepare_data
-from model_factory import create_model
 from config import ShareConfig, add_args
 
 if __name__ == "__main__":

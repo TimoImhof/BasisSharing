@@ -129,9 +129,6 @@ def prep_ptb(context_length, tokenizer, dataset_cache_dir=None):
 
 def prep_c4(context_length, tokenizer, dataset_cache_dir=None):
     print("load C4 dataset")
-    train_raw_dataset = load_dataset(
-        "json", data_dir=dataset_cache_dir, data_files="c4-train.json"
-    )["train"]
     val_raw_dataset = load_dataset(
         "json", data_dir=dataset_cache_dir, data_files="c4-validation.json"
     )["train"]

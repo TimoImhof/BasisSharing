@@ -13,7 +13,7 @@ from transformers.models.gpt2.modeling_gpt2 import (
     GPT2Model,
 )
 from transformers.utils import logging
-from model_utils import build_basis_collection, Basis, Coefficient
+from model_utils import build_basis_collection, Coefficient
 
 logger = logging.get_logger(__name__)
 

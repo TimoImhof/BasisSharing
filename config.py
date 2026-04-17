@@ -110,7 +110,7 @@ class ShareConfig:
         with open(yaml_path, "r") as stream:
             try:
                 return yaml.safe_load(stream)
-            except yaml.YAMLError as exc:
+            except yaml.YAMLError:
                 raise ValueError("Yaml error - check yaml file")
 
     def set_attr_from_config(self, configuration):

@@ -72,7 +72,7 @@ class Calib:
         # The following code is from https://github.com/AIoT-MLSys-Lab/SVD-LLM
         try:
             scaling_diag_matrix = torch.linalg.cholesky(data).T
-        except Exception as e:
+        except Exception:
             print("Warning: eigen scaling_diag_matrix is not positive!")
             eigenvalues = torch.linalg.eigvalsh(data)
             data += (-eigenvalues[0] + 7e-6) * torch.eye(data.shape[0]).to(data.device)
@@ -109,7 +109,7 @@ class Calib:
         for i, batch in tqdm(enumerate(dataloader)):
             with torch.no_grad():
                 batch = {k: v.to(model.device) for k, v in batch.items()}
-                out = model(**batch)
+                model(**batch)
 
         assert save_path is not None
         for name in names:
@@ -149,7 +149,7 @@ class Calib:
         for i, batch in tqdm(enumerate(dataloader)):
             with torch.no_grad():
                 batch = {k: v.to(model.device) for k, v in batch.items()}
-                out = model(**batch)
+                model(**batch)
 
         assert save_path is not None
         for name in names:
