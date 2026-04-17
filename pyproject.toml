@@ -1,0 +1,7 @@
+[project]
+name = "basissharing"
+version = "0.1.0"
+description = "Productionized version of the code for the paper: \"Basis Sharing: Cross-Layer Parameter Sharing For Large Language Model Compression\""
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
