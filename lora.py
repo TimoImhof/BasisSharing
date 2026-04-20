@@ -5,7 +5,7 @@ from peft import get_peft_model, PeftModel
 from model_factory import create_model
 from transformers import TrainingArguments, Trainer
 from config import ShareConfig, add_args
-from test import compute_ppl
+from eval_ppl import compute_ppl
 from prepare_data import prepare_data
 
 
