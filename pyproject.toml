@@ -4,10 +4,25 @@ version = "0.1.0"
 description = "Productionized version of the code for the paper: \"Basis Sharing: Cross-Layer Parameter Sharing For Large Language Model Compression\""
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "pytest>=9.0.3",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+]
 
 [dependency-groups]
 dev = [
     "pre-commit>=4.5.1",
     "ruff>=0.15.11",
 ]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+torchvision = [{ index = "pytorch-cu130" }]
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv]
+package = true
