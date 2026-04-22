@@ -31,6 +31,7 @@ dependencies = [
     { name = "pytest" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "tqdm" },
     { name = "transformers" },
 ]
 
@@ -45,6 +46,7 @@ requires-dist = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "torch", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torchvision", specifier = ">=0.26.0", index = "https://download.pytorch.org/whl/cu130" },
+    { name = "tqdm", specifier = ">=4.67.3" },
     { name = "transformers", specifier = ">=5.5.4" },
 ]
 
