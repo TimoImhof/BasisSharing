@@ -108,10 +108,14 @@ class BasisSharingMixin:
             U, Sigma, Vh = torch.linalg.svd(
                 W_scaled_concat, full_matrices=False
             )  # U: [d1, d1], Sigma: [d1,], Vh: [d1, n * d2]
-            d_1 = W_scaled_concat.shape[
-                0
-            ]  # W_scaled is [d1, n * d2], computed in math convention
+            d_1, n_d2 = W_scaled_concat.shape
+            # W_scaled is [d1, n * d2], computed in math convention
             k = max(1, int(d_1 * (1 - cfg.compression_ratio)))
+            if k >= n_d2:
+                raise ValueError(
+                    f"Rank inflation detected for group {uid}: k={k} >= n*d2={n_d2}. "
+                    f"Compression only works for square or upward projection matrices."
+                )
 
             # Compute basis B' and coefficients C' from truncated SVD, then apply inverse scaling to B'
             B_prime = U[:, :k] @ torch.diag(Sigma[:k])  # [d_1, k]
