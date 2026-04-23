@@ -33,7 +33,9 @@ class BasisSharingMixin:
                 continue
 
             collected[module_name] = {
-                "weight": module.weight.data.clone(),
+                "weight": module.weight.data.detach()
+                .cpu()
+                .clone(),  # store weight on CPU to save GPU memory
                 "XtX": None,
             }
 
@@ -43,11 +45,11 @@ class BasisSharingMixin:
                         inp[0].detach().float().reshape(-1, inp[0].shape[-1])
                     )  # [tokens, d]
                     if collected[name]["XtX"] is None:
-                        collected[name]["XtX"] = X.T @ X
+                        collected[name]["XtX"] = (X.T @ X).cpu()
                     else:
                         collected[name]["XtX"] += (
                             X.T @ X
-                        )  # X_concat.T @ X_concat = X(1).T @ X(1)  +  X(2).T @ X(2)  + ... +  X(n).T @ X(n)
+                        ).cpu()  # X_concat.T @ X_concat = X(1).T @ X(1)  +  X(2).T @ X(2)  + ... +  X(n).T @ X(n)
 
                 return hook
 
@@ -74,7 +76,9 @@ class BasisSharingMixin:
             with self._attach_hooks(cfg.module_name) as collected:
                 self.eval()
                 with torch.no_grad():
-                    for sample in samples:
+                    for sample in tqdm(
+                        samples, desc=f"Hooking {cfg.module_name}", leave=False
+                    ):
                         self(sample)
 
             # Group collected data by uid (consecutive groups of group_size)
