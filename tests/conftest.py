@@ -1,4 +1,3 @@
-import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -83,13 +82,3 @@ class MinimalModel(nn.Module):
         for block in self.blocks:
             x = block(x)
         return x
-
-
-@pytest.fixture
-def minimal_model():
-    return MinimalModel()
-
-
-skip_if_no_cuda = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="CUDA is not available"
-)
