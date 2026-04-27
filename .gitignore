@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Benchmark data
+benchmarks/llama_2_7B/xtx_data
+benchmarks/llama_2_7B/compressed_weights
