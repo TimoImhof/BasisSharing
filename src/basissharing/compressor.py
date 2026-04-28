@@ -26,41 +26,44 @@ class WeightCompressor:
 
             # Compute Scaling matrix S from sum of XtX
             XtX = sum(
-                torch.from_numpy(np.load(os.path.join(xtx_dir, f"{n}.npy"))).float()
+                torch.from_numpy(np.load(os.path.join(xtx_dir, f"{n}.npy"))).to(
+                    torch.float32
+                )
                 for n in layers
-            ).float()
+            )  # [d1, d1]
             if not self.compression_on_cpu:
                 XtX = XtX.to(target_device)
-            eivals, eivecs = torch.linalg.eigh(XtX)
-            S = eivecs @ torch.diag(torch.sqrt(eivals.clamp(min=1e-8)))
+            eivals, eivecs = torch.linalg.eigh(XtX)  # [d1,], [d1, d1]
+            S = eivecs @ torch.diag(torch.sqrt(eivals.clamp(min=1e-8)))  # [d1, d1]
 
             # Scale and concatenate weights: S @ W_i.T for each layer i, then concat along columns
             W_list = []
             for name in layers:
-                W = model.get_submodule(name).weight.detach().float()
-                scaled = S.to(W.device) @ W.T  # [d1, d2] | always on GPU
+                W = model.get_submodule(name).weight.detach().to(torch.float32)
+                scaled = (
+                    S.to(W.device) @ W.T
+                )  # [d1, d1] @ [d1, d2]  = [d1, d2] | always on GPU
                 W_list.append(scaled.cpu() if self.compression_on_cpu else scaled)
             W_scaled_concat = torch.cat(W_list, dim=1)  # [d1, n * d2]
 
             # Compute basis B' and coefficients C' from truncated SVD, then apply inverse scaling to B'
             U, Sigma, Vh = torch.linalg.svd(
                 W_scaled_concat, full_matrices=False
-            )  # U: [d1, d1], Sigma: [d1,], Vh: [d1, n * d2]
-            d_1, n_d2 = W_scaled_concat.shape
-            k = max(1, int(d_1 * (1 - cfg.compression_ratio)))
+            )  # U: [d1, d1], Sigma: [d1,], Vh: [d1, n * d2] (! if d1 <= n*d2)
+            d1, n_d2 = W_scaled_concat.shape
+            k = max(1, int(d1 * (1 - cfg.compression_ratio)))
             if k >= n_d2:
                 raise ValueError(
                     f"Rank inflation detected for group {uid}: k={k} >= n*d2={n_d2}. "
                     f"Compression only works for square or upward projection matrices."
                 )
-            B_prime = U[:, :k] @ torch.diag(Sigma[:k])  # [d_1, k]
+            B_prime = U[:, :k] @ torch.diag(Sigma[:k])  # [d1, k]
             C_prime_concat = Vh[:k, :]  # [k, n * d_2]
             S_pinv = torch.linalg.pinv(
                 S.cpu() if self.compression_on_cpu else S, rcond=1e-6
             )  # [d1, d1], pseudo-inverse for numerical stability
-            B_prime_prime = S_pinv @ B_prime  # [d_1, k]
+            B_prime_prime = S_pinv @ B_prime  # [d1, k]
 
-            # 5. Save results
             dtype = model.get_submodule(layers[0]).weight.dtype
             torch.save(
                 {
