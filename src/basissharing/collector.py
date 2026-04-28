@@ -11,8 +11,6 @@ from tqdm import tqdm
 
 
 class ShelfWriter:
-    """Asynchronously merges XtX tensors into disk-backed numpy memmaps."""
-
     def __init__(self, shelf_dir: str):
         self.shelf_dir = shelf_dir
         os.makedirs(shelf_dir, exist_ok=True)
@@ -24,9 +22,8 @@ class ShelfWriter:
         return self
 
     def __exit__(self, *_):
-        """Wait for all queued work to finish, then stop the worker thread."""
-        self.queue.join()  # blocks until every task_done() has been called
-        self.queue.put(None)  # sentinel: exit the iter() loop
+        self.queue.join()
+        self.queue.put(None)
         self.thread.join()
 
     def _worker(self):
@@ -36,25 +33,27 @@ class ShelfWriter:
                     path = os.path.join(self.shelf_dir, f"{uid}.npy")
                     shape = new_xtx.shape
 
+                    # Write directly to disk without loading into DRAM
                     if not os.path.exists(path):
-                        np.save(path, np.zeros(shape, dtype=np.float32))
+                        mm = np.lib.format.open_memmap(
+                            path, mode="w+", dtype=np.float32, shape=shape
+                        )
+                    else:
+                        mm = np.lib.format.open_memmap(path, mode="r+")
+                    mm += new_xtx
+                    del mm  # flush and release
 
-                    mm = np.load(path, mmap_mode="r+")
-                    mm += new_xtx.numpy()
             except Exception as e:
                 print(f"Error in ShelfWriter: {e}")
             finally:
                 self.queue.task_done()
 
-    def flush(self, data: Dict[str, torch.Tensor]):
-        """Push a buffer of CPU tensors to the merge queue."""
+    def flush(self, data: Dict[str, np.ndarray]):
         if data:
             self.queue.put(data)
 
 
 class InputCollector:
-    """Gathers XtX activations from a model and manages the persistent shelf."""
-
     def __init__(
         self,
         model: nn.Module,
@@ -66,14 +65,10 @@ class InputCollector:
         self.target_nn_modules = target_nn_modules
         self.save_dir = save_dir
         self.dram_limit_gb = dram_limit_gb
-        self.current_buffer: Dict[str, torch.Tensor] = defaultdict(lambda: 0)
+        self.current_buffer: Dict[str, np.ndarray] = defaultdict(lambda: 0)
 
     def _get_buffer_size_gb(self) -> float:
-        return sum(
-            t.element_size() * t.numel()
-            for t in self.current_buffer.values()
-            if isinstance(t, torch.Tensor)
-        ) / (1024**3)
+        return sum(a.nbytes for a in self.current_buffer.values()) / (1024**3)
 
     @contextmanager
     def _attach_hooks(self):
@@ -84,9 +79,11 @@ class InputCollector:
 
             def make_hook(n):
                 def hook(_m, inp, _o):
-                    X = inp[0].detach().float().reshape(-1, inp[0].shape[-1])
-                    self.current_buffer[n] = self.current_buffer[n] + X.T @ X
-                    #  X_concat.T @ X_concat = X(1).T @ X(1)  +  X(2).T @ X(2)  + ... +  X(n).T @ X(n)
+                    X = (
+                        inp[0].detach().reshape(-1, inp[0].shape[-1])
+                    )  # compute on GPU in org precision
+                    xtx = (X.T @ X).cpu().float().numpy()  # now store in CPU DRAM
+                    self.current_buffer[n] += xtx
 
                 return hook
 
@@ -98,17 +95,13 @@ class InputCollector:
                 h.remove()
 
     def _flush_buffer(self, writer: ShelfWriter):
-        writer.flush(
-            {
-                k: v.cpu()
-                for k, v in self.current_buffer.items()
-                if isinstance(v, torch.Tensor)
-            }
-        )
+        if not self.current_buffer:
+            return
+        writer.flush(dict(self.current_buffer))
+        writer.queue.join()
         self.current_buffer = defaultdict(lambda: 0)
 
     def collect(self, dataloader):
-        """Run forward passes and flush to disk."""
         with (
             ShelfWriter(self.save_dir) as writer,
             torch.no_grad(),
