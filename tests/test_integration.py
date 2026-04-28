@@ -35,7 +35,7 @@ def test_full_pipeline_integration(bs_config, dummy_samples, tmp_path):
     optimizer.compress(model, xtx_dir, weight_dir)
 
     init_basissharing(model, bs_config)
-    model.apply_from_shelf(weight_dir)
+    model.apply_compression(weight_dir)
 
     model.eval()
     with torch.no_grad():
@@ -56,7 +56,7 @@ def test_save_load_persistence(bs_config, dummy_samples, tmp_path):
     InputCollector(model, ["q", "up"], xtx_dir).collect(dummy_samples)
     WeightCompressor(bs_config).compress(model, xtx_dir, weight_dir)
     init_basissharing(model, bs_config)
-    model.apply_from_shelf(weight_dir)
+    model.apply_compression(weight_dir)
 
     # Get reference output
     model.eval()

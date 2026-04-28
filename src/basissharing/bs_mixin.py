@@ -8,21 +8,18 @@ import torch.nn.functional as F
 
 
 class SharedLinear(nn.Module):
-    def __init__(self, org_module, basis_registry, uid, coeffs):
+    def __init__(self, basis_registry, uid, coeffs, device, bias=None):
         super().__init__()
         object.__setattr__(
             self, "basis_registry", basis_registry
         )  # Avoids registration as a submodule
         self.uid = uid
-        self.coeffs = nn.Parameter(coeffs)
-        self.bias = (
-            nn.Parameter(org_module.bias.data.clone())
-            if org_module.bias is not None
-            else None
-        )
+        self.coeffs = nn.Parameter(coeffs).to(device)
+        self.bias = nn.Parameter(bias) if bias is not None else None
+        self.device = device
 
     def forward(self, X: torch.Tensor):
-        basis = self.basis_registry.get_basis(self.uid)  # [d_in, k]
+        basis = self.basis_registry.get_basis(self.uid).to(self.device)  # [d_in, k]
         weight = torch.matmul(
             basis, self.coeffs
         ).T  # [d_in, k] @ [k, d_out] -> [d_in, d_out] -> transpose to [d_out, d_in] for F.linear
@@ -57,8 +54,7 @@ class BasisSharingMixin:
         self.basis_registry = BasisRegistry()
         self.groups = get_groups(self, bs_config)
 
-    def apply_from_shelf(self, weight_dir: str):
-        """Swaps nn.Linear for SharedLinear using weights from the shelf."""
+    def apply_compression(self, weight_dir: str):
         for uid, group in tqdm(self.groups.items(), desc="Applying shared weights"):
             data = torch.load(os.path.join(weight_dir, f"{uid}.pt"), map_location="cpu")
             self.basis_registry.add_basis(uid, data["basis"])
@@ -74,7 +70,9 @@ class BasisSharingMixin:
         parent = self.get_submodule(".".join(path)) if path else self
         old_mod = getattr(parent, target)
 
-        new_mod = SharedLinear(old_mod, self.basis_registry, uid, coeffs)
+        new_mod = SharedLinear(
+            self.basis_registry, uid, coeffs, old_mod.weight.device, bias=old_mod.bias
+        )
         new_mod.to(old_mod.weight.device)
 
         # Free memory immediately
