@@ -30,8 +30,8 @@ def load(save_dir, uid):
 def test_shelf_writer_merges_correctly(save_dir):
     with ShelfWriter(save_dir) as writer:
         uid = "test_layer"
-        writer.flush({uid: torch.ones(4, 4)})
-        writer.flush({uid: torch.ones(4, 4) * 2})
+        writer.flush({uid: np.ones((4, 4))})
+        writer.flush({uid: np.ones((4, 4)) * 2})
 
     result = load(save_dir, uid)
     assert torch.all(result == 3.0)
