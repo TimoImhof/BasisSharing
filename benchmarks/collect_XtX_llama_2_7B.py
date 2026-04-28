@@ -25,7 +25,7 @@ def main():
             torch.tensor(s["input_ids"], dtype=torch.long)
             for s in val_dataset.select(range(128))
         ],
-        batch_size=4,
+        batch_size=2,
         shuffle=False,
         collate_fn=lambda batch: torch.stack(batch),
     )
@@ -35,6 +35,12 @@ def main():
         module_cfgs=[
             ModuleSharingConfig(
                 module_name="q_proj", group_size=2, compression_ratio=0.2
+            ),
+            ModuleSharingConfig(
+                module_name="k_proj", group_size=2, compression_ratio=0.2
+            ),
+            ModuleSharingConfig(
+                module_name="v_proj", group_size=2, compression_ratio=0.2
             ),
             ModuleSharingConfig(
                 module_name="gate_proj", group_size=2, compression_ratio=0.2

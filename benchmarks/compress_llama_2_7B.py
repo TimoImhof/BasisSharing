@@ -12,6 +12,12 @@ def main():
                 module_name="q_proj", group_size=2, compression_ratio=0.2
             ),
             ModuleSharingConfig(
+                module_name="k_proj", group_size=2, compression_ratio=0.2
+            ),
+            ModuleSharingConfig(
+                module_name="v_proj", group_size=2, compression_ratio=0.2
+            ),
+            ModuleSharingConfig(
                 module_name="gate_proj", group_size=2, compression_ratio=0.2
             ),
             ModuleSharingConfig(
