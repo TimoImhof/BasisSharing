@@ -80,9 +80,9 @@ class InputCollector:
             def make_hook(n):
                 def hook(_m, inp, _o):
                     X = (
-                        inp[0].detach().reshape(-1, inp[0].shape[-1])
-                    )  # compute on GPU in org precision
-                    xtx = (X.T @ X).cpu().float().numpy()  # now store in CPU DRAM
+                        inp[0].detach().reshape(-1, inp[0].shape[-1]).to(torch.float32)
+                    )  # compute on GPU in org precision | Important: use float32 for numerical stability in SVD
+                    xtx = (X.T @ X).cpu().numpy()  # now store in CPU DRAM
                     self.current_buffer[n] += xtx
 
                 return hook
