@@ -1,6 +1,38 @@
+import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from basissharing import BSConfig, ModuleSharingConfig
+
+
+@pytest.fixture
+def samples():
+    torch.manual_seed(0)
+    # Shape: (batch=1, seq=10, hidden=64) — matches MinimalModel input
+    return [torch.randn(1, 10, 64) for _ in range(8)]
+
+
+@pytest.fixture
+def batches():
+    torch.manual_seed(0)
+    # Generate 8 batches of shape (1, 10, 64)
+    return [torch.randn(4, 10, 64) for _ in range(8)]
+
+
+@pytest.fixture
+def model():
+    return MinimalModel(num_layers=4, hidden=64, ffn_dim=128)
+
+
+@pytest.fixture
+def bs_config():
+    return BSConfig(
+        model_id="minimal",
+        module_cfgs=[
+            ModuleSharingConfig("q", group_size=2, compression_ratio=0.5),
+            ModuleSharingConfig("up", group_size=2, compression_ratio=0.5),
+        ],
+    )
 
 
 class MinimalAttention(nn.Module):

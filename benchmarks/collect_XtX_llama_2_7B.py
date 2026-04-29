@@ -15,7 +15,7 @@ def main():
     )
     tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
 
-    _, val_dataset, _, _ = prepare_data(
+    train_dataset, _, _, _ = prepare_data(
         dataset_name="wikitext",
         tokenizer=tokenizer,
         context_length=2048,
@@ -23,7 +23,7 @@ def main():
     calibration_samples = DataLoader(
         [
             torch.tensor(s["input_ids"], dtype=torch.long)
-            for s in val_dataset.select(range(128))
+            for s in train_dataset.select(range(256))
         ],
         batch_size=2,
         shuffle=False,

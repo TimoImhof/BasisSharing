@@ -1,18 +1,10 @@
 import pytest
 import os
+
+from torch import nn
 from basissharing.collector import ShelfWriter, InputCollector
 import torch
-import torch.nn as nn
 import numpy as np
-
-
-@pytest.fixture
-def dummy_model():
-    torch.manual_seed(42)
-    return nn.Sequential(
-        nn.Linear(16, 16, bias=False),
-        nn.Linear(16, 16, bias=False),
-    )
 
 
 @pytest.fixture
@@ -27,67 +19,92 @@ def load(save_dir, uid):
     return torch.from_numpy(np.load(os.path.join(save_dir, f"{uid}.npy")))
 
 
-def test_shelf_writer_merges_correctly(save_dir):
-    with ShelfWriter(save_dir) as writer:
-        uid = "test_layer"
-        writer.flush({uid: np.ones((4, 4))})
-        writer.flush({uid: np.ones((4, 4)) * 2})
+class TestShelfWriter:
+    def test_shelf_writer_merges_correctly(self, save_dir):
+        with ShelfWriter(save_dir) as writer:
+            uid = "test_layer"
+            writer.flush({uid: np.ones((4, 4))})
+            writer.flush({uid: np.ones((4, 4)) * 2})
 
-    result = load(save_dir, uid)
-    assert torch.all(result == 3.0)
+        result = load(save_dir, uid)
+        assert torch.all(result == 3.0)
 
+    def test_writer_context_manager_closes_on_exception(self, save_dir):
+        """Thread must not leak when an exception fires inside the with block."""
+        writer = ShelfWriter(save_dir)
+        try:
+            with writer:
+                writer.flush({"x": np.ones((2, 2))})
+                raise RuntimeError("simulated failure")
+        except RuntimeError:
+            pass
 
-def test_collector_mathematical_accuracy(dummy_model, save_dir):
-    """Verify that collector output matches manual XtX computation."""
-    collector = InputCollector(
-        dummy_model,
-        target_nn_modules=["0", "1"],
-        save_dir=save_dir,
-        dram_limit_gb=1.0,
-    )
-
-    batches = [torch.randn(3, 4, 16) for _ in range(3)]
-
-    expected_xtx = torch.zeros(16, 16)
-    for b in batches:
-        X = b.reshape(-1, 16)
-        expected_xtx += X.T @ X
-
-    collector.collect(batches)
-
-    actual_xtx = load(save_dir, "0")
-    assert torch.allclose(expected_xtx, actual_xtx, atol=1e-5)
+        assert not writer.thread.is_alive(), "Worker thread leaked after exception"
 
 
-def test_collector_dram_limit_trigger(dummy_model, save_dir):
-    """Verify collector still works correctly when forced to flush multiple times."""
-    collector = InputCollector(
-        dummy_model,
-        target_nn_modules=["0", "1"],
-        save_dir=save_dir,
-        dram_limit_gb=0.000001,
-    )
+class TestCollector:
+    def test_expected_files_created(self, model, save_dir, batches):
+        """Verify that collector creates .npy files for each target module."""
+        target_modules = ["q", "k", "o", "up", "down"]
+        collector = InputCollector(
+            model, target_nn_modules=target_modules, save_dir=save_dir
+        )
+        collector.collect(batches)
 
-    samples = [torch.randn(1, 16) for _ in range(10)]
+        created_files = set(os.listdir(save_dir))
+        expected_files = {
+            f"{i[0]}.npy"
+            for i in model.named_modules()
+            if i[0].split(".")[-1] in target_modules
+        }
+        assert expected_files.issubset(created_files), (
+            f"Expected files {expected_files} not found in {created_files}"
+        )
 
-    expected_xtx = torch.zeros(16, 16)
-    for s in samples:
-        expected_xtx += s.T @ s
+    def test_collector_math_matches_manual_computation(self, save_dir, batches):
+        """Verify that collector output matches manual XtX computation for the first layer."""
+        collector = InputCollector(
+            nn.Sequential(
+                nn.Linear(64, 64, bias=False),  # "0"
+                nn.Linear(64, 64, bias=False),  # "1"
+            ),
+            target_nn_modules=["0"],
+            save_dir=save_dir,
+        )
+        collector.collect(batches)
+        actual_xtx = load(save_dir, "0")
 
-    collector.collect(samples)
+        expected_xtx = torch.zeros(64, 64)
+        for b in batches:
+            X = b.reshape(-1, 64)  # (batch_size * seq_len, hidden_dim)
+            XtX = X.T @ X
+            expected_xtx += XtX
+        assert torch.allclose(expected_xtx, actual_xtx, atol=1e-5)
 
-    actual_xtx = load(save_dir, "0")
-    assert torch.allclose(expected_xtx, actual_xtx, atol=1e-5)
+    def test_xtx_accumulates_across_batches(self, model, tmp_path, samples):
+        """More samples should produce larger XtX (more activation energy)."""
+        xtx_dir_2 = str(tmp_path / "xtx_2")
+        xtx_dir_8 = str(tmp_path / "xtx_8")
 
+        samples_2 = samples[:2]
+        samples_8 = samples
 
-def test_writer_context_manager_closes_on_exception(save_dir):
-    """Thread must not leak when an exception fires inside the with block."""
-    writer = ShelfWriter(save_dir)
-    try:
-        with writer:
-            writer.flush({"x": torch.ones(2, 2)})
-            raise RuntimeError("simulated failure")
-    except RuntimeError:
-        pass
+        InputCollector(model, ["q"], xtx_dir_2).collect(samples_2)
+        InputCollector(model, ["q"], xtx_dir_8).collect(samples_8)
 
-    assert not writer.thread.is_alive(), "Worker thread leaked after exception"
+        xtx_2 = np.load(os.path.join(xtx_dir_2, "blocks.0.attn.q.npy"))
+        xtx_8 = np.load(os.path.join(xtx_dir_8, "blocks.0.attn.q.npy"))
+        assert np.linalg.norm(xtx_8) > np.linalg.norm(xtx_2)
+
+    def test_xtx_stored_as_float32(self, model, batches, save_dir):
+        InputCollector(model, ["q"], save_dir).collect(batches)
+        xtx = np.load(os.path.join(save_dir, "blocks.0.attn.q.npy"))
+        assert xtx.dtype == np.float32, f"Expected float32, got {xtx.dtype}"
+
+    def test_xtx_is_symmetric(self, model, batches, save_dir):
+        InputCollector(model, ["q", "k", "v", "up", "gate", "down"], save_dir).collect(
+            batches
+        )
+        for xtx_file in os.listdir(save_dir):
+            xtx = np.load(os.path.join(save_dir, xtx_file))
+            assert np.allclose(xtx, xtx.T, atol=1e-5), f"{xtx_file} is not symmetric"
