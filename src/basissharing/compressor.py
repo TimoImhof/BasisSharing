@@ -51,7 +51,9 @@ class WeightCompressor:
                 W_scaled_concat, full_matrices=False
             )  # U: [d1, d1], Sigma: [d1,], Vh: [d1, n * d2] (! if d1 <= n*d2)
             d1, n_d2 = W_scaled_concat.shape
-            k = max(1, int(d1 * (1 - cfg.compression_ratio)))
+            k = max(
+                1, int((1 - cfg.compression_ratio) * n_d2 * d1 / (d1 + n_d2))
+            )  # k × d1 + k x n_d2 = (1 - R) × d1 × n_d2  -> solve for k
             if k >= n_d2:
                 raise ValueError(
                     f"Rank inflation detected for group {uid}: k={k} >= n*d2={n_d2}. "
@@ -64,11 +66,10 @@ class WeightCompressor:
             )  # [d1, d1], pseudo-inverse for numerical stability
             B_prime_prime = S_pinv @ B_prime  # [d1, k]
 
-            dtype = model.get_submodule(layers[0]).weight.dtype
             torch.save(
                 {
-                    "basis": B_prime_prime.to(dtype).cpu(),
-                    "coeffs": C_prime_concat.to(dtype).cpu(),
+                    "basis": B_prime_prime.cpu(),
+                    "coeffs": C_prime_concat.cpu(),
                 },
                 os.path.join(weight_dir, f"{uid}.pt"),
             )

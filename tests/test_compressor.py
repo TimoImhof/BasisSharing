@@ -1,68 +1,97 @@
-import pytest
 import torch
 import os
-from basissharing import WeightCompressor, BSConfig, ModuleSharingConfig
-import numpy as np
-from tests.conftest import MinimalModel
+from basissharing import WeightCompressor, InputCollector, BSConfig, ModuleSharingConfig
 
 
-@pytest.fixture
-def xtx_dir(tmp_path):
-    d = tmp_path / "xtx_data"
-    os.makedirs(d, exist_ok=True)
-    return str(d)
+class TestCompressor:
+    def _run_compression(self, model, samples, bs_config, tmp_path):
+        xtx_dir = str(tmp_path / "xtx")
+        weight_dir = str(tmp_path / "weights")
+        InputCollector(
+            model,
+            bs_config.target_modules(),  # ["q", "up"]
+            xtx_dir,
+        ).collect(samples)
+        WeightCompressor(bs_config).compress(model, xtx_dir, weight_dir)
+        return xtx_dir, weight_dir
 
+    def test_optimizer_creates_valid_files(self, model, batches, bs_config, tmp_path):
+        _, weight_dir = self._run_compression(model, batches, bs_config, tmp_path)
 
-@pytest.fixture
-def weight_dir(tmp_path):
-    d = tmp_path / "weights"
-    os.makedirs(d, exist_ok=True)
-    return str(d)
+        # check that we have 4 files for the 4 q and up modules (2 q's and 2 up's, each with group_size=2)
+        assert len(os.listdir(weight_dir)) == 4
+        assert os.path.exists(os.path.join(weight_dir, "q_2_0.pt"))
+        assert os.path.exists(os.path.join(weight_dir, "q_2_1.pt"))
+        assert os.path.exists(os.path.join(weight_dir, "up_2_0.pt"))
+        assert os.path.exists(os.path.join(weight_dir, "up_2_1.pt"))
+        # check we have weights for basis and coeffs
+        weight_file = os.path.join(weight_dir, "q_2_0.pt")
+        data = torch.load(weight_file)
+        assert "basis" in data
+        assert "coeffs" in data
 
+    def test_saved_weights_are_float32(self, model, batches, bs_config, tmp_path):
+        _, weight_dir = self._run_compression(model, batches, bs_config, tmp_path)
+        data = torch.load(os.path.join(weight_dir, "q_2_0.pt"))
+        assert data["basis"].dtype == torch.float32, (
+            f"Basis should be float32, got {data['basis'].dtype}"
+        )
+        assert data["coeffs"].dtype == torch.float32, (
+            f"Coeffs should be float32, got {data['coeffs'].dtype}"
+        )
 
-def test_optimizer_creates_valid_files(xtx_dir, weight_dir):
-    model = MinimalModel(num_layers=1)
-    cfg = BSConfig(
-        model_id="test",
-        module_cfgs=[ModuleSharingConfig("q", group_size=1, compression_ratio=0.5)],
-    )
-    np.save(arr=np.eye(64), file=os.path.join(xtx_dir, "blocks.0.attn.q.npy"))
+    def test_no_nan_or_inf_in_saved_weights(self, model, batches, bs_config, tmp_path):
+        _, weight_dir = self._run_compression(model, batches, bs_config, tmp_path)
+        for fname in os.listdir(weight_dir):
+            data = torch.load(os.path.join(weight_dir, fname))
+            assert not torch.isnan(data["basis"]).any()
+            assert not torch.isnan(data["coeffs"]).any()
+            assert not torch.isinf(data["basis"]).any()
+            assert not torch.isinf(data["coeffs"]).any()
 
-    opt = WeightCompressor(cfg)
-    opt.compress(model, xtx_dir, weight_dir)
+    def test_basis_shape(self, model, batches, bs_config, tmp_path):
+        _, weight_dir = self._run_compression(model, batches, bs_config, tmp_path)
+        data = torch.load(os.path.join(weight_dir, "q_2_0.pt"))
+        d1, k = data["basis"].shape
+        assert d1 == 64
+        assert d1 > k > 0
 
-    # uid format: {module_name}_{group_size}_{index}
-    weight_file = os.path.join(weight_dir, "q_1_0.pt")
-    assert os.path.exists(weight_file)
+    def test_coeffs_shape(self, model, batches, bs_config, tmp_path):
+        _, weight_dir = self._run_compression(model, batches, bs_config, tmp_path)
+        data = torch.load(os.path.join(weight_dir, "q_2_0.pt"))
+        k, n_d2 = data["coeffs"].shape
+        assert n_d2 == 2 * 64
 
-    data = torch.load(weight_file)
-    assert "basis" in data
-    assert "coeffs" in data
-    # Basis for q should be (hidden_dim, hidden_dim * compression_ratio) = (64, 64 * 0.5) = (64, 32)
-    assert data["basis"].shape == (64, 32)
+    def test_compressed_param_count_matches_ratio(
+        self, model, batches, bs_config, tmp_path
+    ):
+        _, weight_dir = self._run_compression(model, batches, bs_config, tmp_path)
+        # q group: 2 layers, each [64, 64] → original = 2 * 64 * 64 = 8192
+        data = torch.load(os.path.join(weight_dir, "q_2_0.pt"))
+        basis, coeffs = data["basis"], data["coeffs"]
 
+        d1, k = basis.shape
+        k2, n_d2 = coeffs.shape
+        assert k == k2, "Basis and coeffs rank mismatch"
 
-def test_optimizer_grouping(xtx_dir, weight_dir):
+        original_params = 2 * 64 * 64  # 2 layers * d1 * d2
+        compressed_params = d1 * k + k * n_d2
+        actual_ratio = 1 - compressed_params / original_params
 
-    model = MinimalModel(num_layers=2)
-    bs_config = BSConfig(
-        model_id="test",
-        module_cfgs=[
-            ModuleSharingConfig("gate", group_size=2, compression_ratio=0.5),
-        ],
-    )
+        assert abs(actual_ratio - 0.5) < 0.01, (
+            f"Compression ratio off: expected ~0.5, got {actual_ratio:.3f}"
+        )
 
-    # popularize xtx dir
-    np.save(file=os.path.join(xtx_dir, "blocks.0.ffn.gate.npy"), arr=np.eye(64))
-    np.save(file=os.path.join(xtx_dir, "blocks.1.ffn.gate.npy"), arr=np.eye(64))
-
-    compr = WeightCompressor(bs_config=bs_config, compression_on_cpu=True)
-    compr.compress(model, xtx_dir, weight_dir)
-
-    # Should produce 1 file for the group of 2
-    assert os.path.exists(os.path.join(weight_dir, "gate_2_0.pt"))
-    data = torch.load(os.path.join(weight_dir, "gate_2_0.pt"))
-    # Coeffs should be (k, 2 * d2) = (hidden_dim * 0.5, 2 * ffn_dim) = (32, 256)
-    assert data["coeffs"].shape == (32, 256)
-    # Should not produce any other files since only 'gate' is configured for sharing
-    assert len(os.listdir(weight_dir)) == 1
+    def test_minimum_rank_is_one(self, model, batches, tmp_path):
+        aggressive_config = BSConfig(
+            model_id="minimal",
+            module_cfgs=[
+                ModuleSharingConfig("q", group_size=2, compression_ratio=0.99)
+            ],
+        )
+        _, weight_dir = self._run_compression(
+            model, batches, aggressive_config, tmp_path
+        )
+        data = torch.load(os.path.join(weight_dir, "q_2_0.pt"))
+        k = data["basis"].shape[1]
+        assert k >= 1
