@@ -115,6 +115,7 @@ class InputCollector:
                 self.model(batch.to(device))
 
                 if self._get_buffer_size_gb() > self.dram_limit_gb:
+                    # TODO: This check is currently useless since we process all target modules simultaneously, so either all layer inputs fit in DRAM or none do
                     self._flush_buffer(writer)
 
             self._flush_buffer(writer)

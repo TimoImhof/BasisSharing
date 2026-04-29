@@ -55,7 +55,7 @@ def main():
         model=model,
         target_nn_modules=bs_config.target_modules(),
         save_dir="./benchmarks/llama_2_7B/xtx_data",
-        dram_limit_gb=4,
+        dram_limit_gb=12,
     )
     collector.collect(calibration_samples)
 
