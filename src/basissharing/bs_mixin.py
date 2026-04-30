@@ -3,39 +3,26 @@ import torch.nn as nn
 import os
 from tqdm import tqdm
 from basissharing.bs_config import BSConfig, get_groups
-import torch.nn.functional as F
 
 
 class SharedLinear(nn.Module):
-    def __init__(self, basis_registry, uid, coeffs, device, bias=None):
+    def __init__(self, basis_registry, uid, coeffs, device, dtype, bias=None):
         super().__init__()
         object.__setattr__(self, "basis_registry", basis_registry)
         self.uid = uid
-        self.coeffs = nn.Parameter(coeffs.to(device))
-        self.bias = nn.Parameter(bias.to(device)) if bias is not None else None
-        self._cached_weight: torch.Tensor | None = None
-
-    def _invalidate_cache(self):
-        self._cached_weight = None
-
-    def _get_weight(self) -> torch.Tensor:
-        if not self.training and self._cached_weight is not None:
-            return self._cached_weight
-        basis = self.basis_registry.get_basis(self.uid)  # [d_in, k]
-        out = torch.matmul(
-            basis, self.coeffs
-        ).T  # [d_in, k] @ [k, d_out] -> [d_in, d_out] -> transpose to [d_out, d_in] for F.linear
-        if not self.training:
-            self._cached_weight = out.detach()  # Cache the weight for inference
-        return out
-
-    def train(self, mode: bool = True):
-        if mode:
-            self._invalidate_cache()
-        return super().train(mode)
+        k, d_out = coeffs.shape
+        self.coeff_proj = nn.Linear(
+            k, d_out, bias=bias is not None, device=device, dtype=dtype
+        )
+        with torch.no_grad():
+            self.coeff_proj.weight.copy_(coeffs.T)  # Linear expects [d_out, k]
+            if bias is not None:
+                self.coeff_proj.bias.copy_(bias)
 
     def forward(self, X: torch.Tensor):
-        return F.linear(X, self._get_weight(), self.bias)
+        basis_linear = self.basis_registry.get_basis(self.uid)
+        hidden = basis_linear(X)  # [b*s, d_in] → [b*s, k]
+        return self.coeff_proj(hidden)  # [b*s, k] → [b*s, d_out]
 
 
 def init_basissharing(model: nn.Module, bs_config: BSConfig):
@@ -49,12 +36,17 @@ def init_basissharing(model: nn.Module, bs_config: BSConfig):
 class BasisRegistry(nn.Module):
     def __init__(self):
         super().__init__()
-        self.bases = nn.ParameterDict()
+        self.bases = nn.ModuleDict()
 
-    def add_basis(self, uid: str, tensor: torch.Tensor):
-        self.bases[uid] = nn.Parameter(tensor)
+    def add_basis(self, uid: str, tensor: torch.Tensor, device, dtype):
+        """tensor: [d_in, k]"""
+        d_in, k = tensor.shape
+        linear = nn.Linear(d_in, k, bias=False, device=device, dtype=dtype)
+        with torch.no_grad():
+            linear.weight.copy_(tensor.T)  # Linear expects [k, d_in]
+        self.bases[uid] = linear
 
-    def get_basis(self, uid: str) -> torch.Tensor:
+    def get_basis(self, uid: str) -> nn.Linear:
         return self.bases[uid]
 
 
@@ -72,44 +64,52 @@ class BasisSharingMixin:
             self.basis_registry,
             uid,
             coeffs,
-            old_mod.weight.device,
             bias=old_mod.bias.data.clone() if old_mod.bias is not None else None,
+            device=old_mod.weight.device,
+            dtype=old_mod.weight.dtype,
         )
 
-        # Free memory immediately
-        old_mod.weight.data = torch.empty(0)
-        if old_mod.bias is not None:
-            old_mod.bias.data = torch.empty(0)
-
         setattr(parent, target, new_mod)
+        del old_mod
 
     def apply_compression(self, weight_dir: str):
         for uid, group in tqdm(self.groups.items(), desc="Applying shared weights"):
             basis_and_coeffs = torch.load(
                 os.path.join(weight_dir, f"{uid}.pt"), map_location="cpu"
             )
+            basis, coeffs = basis_and_coeffs["basis"], basis_and_coeffs["coeffs"]
 
-            device = self.get_submodule(group["layers"][0]).weight.device
-            self.basis_registry.add_basis(uid, basis_and_coeffs["basis"].to(device))
+            # Add basis layer to registry
+            target = self.get_submodule(group["layers"][0]).weight
+            device, dtype = (
+                target.device,
+                target.dtype,
+            )
+            self.basis_registry.add_basis(uid, basis, device=device, dtype=dtype)
 
+            # Replace layers in group with SharedLinear
             for i, name in enumerate(group["layers"]):
-                old_mod = self.get_submodule(name)
-                d2 = old_mod.weight.shape[0]
-                coeffs = basis_and_coeffs["coeffs"][:, i * d2 : (i + 1) * d2]
-                self._replace_module(name, uid, coeffs)
+                d2, _ = self.get_submodule(name).weight.shape  # [d2, d1]
+                self._replace_module(
+                    name,
+                    uid,
+                    coeffs[:, i * d2 : (i + 1) * d2],
+                )
 
-    def save_compressed_weights(self, path: str):
-        torch.save(self.state_dict(), path)
-
-    def load_compressed_weights(self, path: str):
-        state_dict = torch.load(path, map_location="cpu")
+    def save_compressed_weights(self, weight_dir: str):
+        os.makedirs(weight_dir, exist_ok=True)
         for uid, group in self.groups.items():
-            target_device = self.get_submodule(group["layers"][0]).weight.device
-            self.basis_registry.add_basis(
-                uid, state_dict[f"basis_registry.bases.{uid}"].to(target_device)
+            # basis linear weight is [k, d_in], transpose back to [d_in, k] for storage
+            basis = self.basis_registry.get_basis(uid).weight.T.detach().cpu()
+            coeffs_list = []
+            for name in group["layers"]:
+                shared = self.get_submodule(name)
+                # coeff_proj weight is [d_out, k], transpose back to [k, d_out] for storage
+                coeffs_list.append(shared.coeff_proj.weight.T.detach().cpu())
+            torch.save(
+                {"basis": basis, "coeffs": torch.cat(coeffs_list, dim=1)},
+                os.path.join(weight_dir, f"{uid}.pt"),
             )
 
-            for i, name in enumerate(group["layers"]):
-                if (coeffs_key := f"{name}.coeffs") in state_dict:
-                    self._replace_module(name, uid, state_dict[coeffs_key])
-        self.load_state_dict(state_dict)
+    def load_compressed_weights(self, weight_dir: str):
+        self.apply_compression(weight_dir)
