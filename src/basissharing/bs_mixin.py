@@ -10,6 +10,7 @@ class SharedLinear(nn.Module):
         super().__init__()
         object.__setattr__(self, "basis_registry", basis_registry)
         self.uid = uid
+        self.device = device
         k, d_out = coeffs.shape
         self.coeff_proj = nn.Linear(
             k, d_out, bias=bias is not None, device=device, dtype=dtype
@@ -20,7 +21,7 @@ class SharedLinear(nn.Module):
                 self.coeff_proj.bias.copy_(bias)
 
     def forward(self, X: torch.Tensor):
-        basis_linear = self.basis_registry.get_basis(self.uid)
+        basis_linear = self.basis_registry.get_basis(self.uid).to(self.device)
         hidden = basis_linear(X)  # [b*s, d_in] → [b*s, k]
         return self.coeff_proj(hidden)  # [b*s, k] → [b*s, d_out]
 

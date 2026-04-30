@@ -53,7 +53,11 @@ class WeightCompressor:
             for name in layers:
                 W = model.get_submodule(name).weight.detach().to(torch.float64)
                 scaled = S.to(W.device) @ W.T  # [d1, d1] @ [d1, d2] = [d1, d2]
-                W_list.append(scaled.cpu() if self.compression_on_cpu else scaled)
+                W_list.append(
+                    scaled.cpu()
+                    if self.compression_on_cpu
+                    else scaled.to(target_device)  # S @ W.T can happen on other device
+                )
             W_scaled_concat = torch.cat(W_list, dim=1)  # [d1, n * d2]
 
             # Compute basis B' and coefficients C' from truncated SVD, then apply inverse scaling to B'
