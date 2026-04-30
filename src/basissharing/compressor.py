@@ -24,52 +24,59 @@ class WeightCompressor:
             cfg, layers = group["cfg"], group["layers"]
             target_device = model.get_submodule(layers[0]).weight.device
 
-            # Compute Scaling matrix S from sum of XtX
+            # Compute Scaling matrix S from sum of XtX using Cholesky decomposition
             XtX = sum(
                 torch.from_numpy(np.load(os.path.join(xtx_dir, f"{n}.npy"))).to(
-                    torch.float32
+                    torch.float64
                 )
                 for n in layers
-            )  # [d1, d1]
+            )  # [d1, d1], float64 for numerical stability
             if not self.compression_on_cpu:
                 XtX = XtX.to(target_device)
-            eivals, eivecs = torch.linalg.eigh(XtX)  # [d1,], [d1, d1]
-            S = eivecs @ torch.diag(torch.sqrt(eivals.clamp(min=1e-8)))  # [d1, d1]
+
+            try:
+                S = torch.linalg.cholesky(XtX).T  # [d1, d1], upper triangular
+            except torch.linalg.LinAlgError:
+                print(
+                    f"[{uid}] Warning: XtX is not positive definite, adding regularization."
+                )
+                eigenvalues = torch.linalg.eigvalsh(XtX)
+                XtX += (-eigenvalues[0] + 7e-6) * torch.eye(
+                    XtX.shape[0], dtype=XtX.dtype, device=XtX.device
+                )
+                S = torch.linalg.cholesky(XtX).T
+                del eigenvalues
+            S_inv = torch.linalg.inv(S)  # [d1, d1]
 
             # Scale and concatenate weights: S @ W_i.T for each layer i, then concat along columns
             W_list = []
             for name in layers:
-                W = model.get_submodule(name).weight.detach().to(torch.float32)
-                scaled = (
-                    S.to(W.device) @ W.T
-                )  # [d1, d1] @ [d1, d2]  = [d1, d2] | always on GPU
+                W = model.get_submodule(name).weight.detach().to(torch.float64)
+                scaled = S.to(W.device) @ W.T  # [d1, d1] @ [d1, d2] = [d1, d2]
                 W_list.append(scaled.cpu() if self.compression_on_cpu else scaled)
             W_scaled_concat = torch.cat(W_list, dim=1)  # [d1, n * d2]
 
             # Compute basis B' and coefficients C' from truncated SVD, then apply inverse scaling to B'
             U, Sigma, Vh = torch.linalg.svd(
                 W_scaled_concat, full_matrices=False
-            )  # U: [d1, d1], Sigma: [d1,], Vh: [d1, n * d2] (! if d1 <= n*d2)
+            )  # U: [d1, d1], Sigma: [d1,], Vh: [d1, n*d2]
             d1, n_d2 = W_scaled_concat.shape
-            k = max(
-                1, int((1 - cfg.compression_ratio) * n_d2 * d1 / (d1 + n_d2))
-            )  # k × d1 + k x n_d2 = (1 - R) × d1 × n_d2  -> solve for k
+            # Solve for k: k*(d1 + n_d2) = (1-R)*d1*n_d2
+            k = max(1, int((1 - cfg.compression_ratio) * n_d2 * d1 / (d1 + n_d2)))
             if k >= n_d2:
                 raise ValueError(
                     f"Rank inflation detected for group {uid}: k={k} >= n*d2={n_d2}. "
                     f"Compression only works for square or upward projection matrices."
                 )
+
             B_prime = U[:, :k] @ torch.diag(Sigma[:k])  # [d1, k]
-            C_prime_concat = Vh[:k, :]  # [k, n * d_2]
-            S_pinv = torch.linalg.pinv(
-                S.cpu() if self.compression_on_cpu else S, rcond=1e-6
-            )  # [d1, d1], pseudo-inverse for numerical stability
-            B_prime_prime = S_pinv @ B_prime  # [d1, k]
+            C_prime_concat = Vh[:k, :]  # [k, n*d2]
+            B_prime_prime = S_inv.to(B_prime.device) @ B_prime  # [d1, k]
 
             torch.save(
                 {
-                    "basis": B_prime_prime.cpu(),
-                    "coeffs": C_prime_concat.cpu(),
+                    "basis": B_prime_prime.to(torch.float32).cpu(),
+                    "coeffs": C_prime_concat.to(torch.float32).cpu(),
                 },
                 os.path.join(weight_dir, f"{uid}.pt"),
             )
@@ -77,6 +84,7 @@ class WeightCompressor:
             del (
                 XtX,
                 S,
+                S_inv,
                 W_list,
                 W_scaled_concat,
                 U,
@@ -84,7 +92,6 @@ class WeightCompressor:
                 Vh,
                 B_prime,
                 C_prime_concat,
-                S_pinv,
                 B_prime_prime,
             )
             gc.collect()
