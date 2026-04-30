@@ -10,5 +10,5 @@ wheels/
 .venv
 
 # Benchmark data
-benchmarks/llama_2_7B/xtx_data
-benchmarks/llama_2_7B/compressed_weights
+benchmarks/**/*.npy
+benchmarks/**/*.pt
