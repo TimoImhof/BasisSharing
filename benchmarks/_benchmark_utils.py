@@ -1,5 +1,35 @@
 from tqdm import tqdm
 import torch
+import os
+from basissharing import InputCollector, WeightCompressor, BSConfig
+
+
+def _compress_model(
+    model: torch.nn.Module,
+    bs_config: BSConfig,
+    calibration_samples: torch.utils.data.DataLoader,
+    xtx_save_dir: str,
+    compressed_weight_save_dir: str,
+):
+    # Input collection
+    collector = InputCollector(
+        model=model,
+        target_nn_modules=bs_config.target_modules(),
+        save_dir=xtx_save_dir,
+        dram_limit_gb=12,
+    )
+    collector.collect(calibration_samples)
+
+    # Weight compression
+    comp = WeightCompressor(
+        bs_config=bs_config,
+        compression_on_cpu=False,
+    )
+    comp.compress(
+        model=model,
+        xtx_dir=os.path.join(os.getcwd(), xtx_save_dir),
+        weight_dir=os.path.join(os.getcwd(), compressed_weight_save_dir),
+    )
 
 
 def compute_ppl(max_length, stride, data, model):
