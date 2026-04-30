@@ -28,7 +28,11 @@ class BSConfig:
         return target_names
 
 
-def get_groups(model: nn.Module, bs_config: BSConfig) -> dict:
+def get_groups(model: nn.Module, bs_config: BSConfig) -> dict[str, dict[str, any]]:
+    """
+    Scans the model for modules matching the BSConfig and organizes them into groups of consecutive layers.
+    Single point of truth for how layers are grouped for basis sharing, used by both `compressor.py` and `bs_mixin.py`.
+    """
     groups = {}
     for cfg in bs_config.module_cfgs:
         if not cfg.enabled:
