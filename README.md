@@ -6,7 +6,7 @@ A generalized implementation of [Basis Sharing: Cross-Layer Parameter Sharing fo
 
 ```bash
 git clone https://github.com/TimoImhof/BasisSharing.git
-uv sync --all-groups
+make install # sync uv + install pre-commit rules
 ```
 
 `basissharing` is installed as a package together with its dependencies in `.venv`. Run pre-configured [benchmarks](./benchmarks/), or write your own script; the general flow is always something like this:
