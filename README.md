@@ -5,7 +5,8 @@ A generalized implementation of [Basis Sharing: Cross-Layer Parameter Sharing fo
 ## Quickstart
 
 ```bash
-git clone https://github.com/TimoImhof/BasisSharing.git
+git clone https://github.com/TimoImhof/basissharing.git
+cd basissharing
 make install # sync uv + install pre-commit rules
 ```
 
