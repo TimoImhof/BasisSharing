@@ -47,6 +47,7 @@ Compression ratio: 20%, group size: 2, calibration: 256 WikiText-2 training samp
 |---|---|---|---
 | Llama-2 7B | 4.86 | 6.07 | `uv run benchmarks/llama_2_7B.py`
 | Mistral 7B | 4.69 | 5.85 | `uv run benchmarks/mistral_7B.py`
+| OPT 6.7B | 9.31 | 10.02 | `uv run benchmarks/opt_6_dot_7B.py`
 
 ## Reference
 
